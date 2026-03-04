@@ -95,7 +95,3 @@ workflows:
   build-and-release:
     jobs:
       - build-all:
-          filters:
-            branches:
-              only:
-                - main
