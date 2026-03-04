@@ -31,7 +31,7 @@ jobs:
           name: Build Netboot
           command: |
             set -euxo pipefail
-            nix build .#netboot -o netboot-result
+            nix build github:ItzEmoji/nixos-images#netboot -o netboot-result
             mkdir -p netboot-artifacts
             cp -L -r netboot-result/* netboot-artifacts/
 
@@ -42,7 +42,7 @@ jobs:
           name: Build Installer ISO
           command: |
             set -euxo pipefail
-            nix build .#iso-installer -o iso-result
+            nix build github:ItzEmoji/nixos-images#iso-installer -o iso-result
             sudo cp -L iso-result/iso/*.iso nixos-installer.iso
 
       # =========================
