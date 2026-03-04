@@ -2,7 +2,6 @@ version: 2.1
 
 jobs:
   build-all:
-    # A machine executor is recommended for Nix OS/ISO builds to avoid Docker-in-Docker limits
     machine:
       image: ubuntu-2204:current
     steps:
@@ -14,10 +13,7 @@ jobs:
       - run:
           name: Install Nix
           command: |
-            # Use the Determinate Systems installer (automatically enables flakes and nix-command)
             curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --no-confirm
-            
-            # Make Nix available to subsequent steps in the same shell by modifying BASH_ENV
             echo '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' >> $BASH_ENV
       
       - run:
@@ -55,7 +51,6 @@ jobs:
       - run:
           name: Generate Tag
           command: |
-            # CIRCLE_BUILD_NUM is the CircleCI equivalent of github.run_number
             TAG="v1.0.${CIRCLE_BUILD_NUM}"
             echo "export TAG=$TAG" >> $BASH_ENV
 
@@ -67,14 +62,11 @@ jobs:
           command: |
             set -euxo pipefail
 
-            # CIRCLE_PROJECT_USERNAME and CIRCLE_PROJECT_REPONAME map to github.repository
             BASE="https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/releases/download/${TAG}"
             FILE="netboot-artifacts/netboot.ipxe"
 
-            # Insert imgfree if not already present
             grep -q '^imgfree' "$FILE" || sed -i '2i imgfree' "$FILE"
 
-            # Replace only the file paths, keep params untouched
             sed -i -E "s|^kernel[[:space:]]+.*bzImage|kernel $BASE/bzImage|" "$FILE"
             sed -i -E "s|^initrd[[:space:]]+.*initrd|initrd $BASE/initrd|" "$FILE"
 
@@ -84,15 +76,13 @@ jobs:
       - run:
           name: Create GitHub Release
           command: |
-            # The gh CLI is typically pre-installed on modern CircleCI machine images.
-            # Create a quick notes file
-            cat <<EOF > release-notes.txt
+            # Escaping the heredoc with \<< to satisfy CircleCI's v2.1+ YAML parser
+            cat \<<EOF > release-notes.txt
             NixOS build outputs:
             - Installer ISO
             - Netboot artifacts
             EOF
             
-            # The gh CLI will automatically authenticate using the $GITHUB_TOKEN env variable
             gh release create "$TAG" \
               --title "Release $TAG" \
               --notes-file release-notes.txt \
