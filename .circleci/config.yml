@@ -76,7 +76,6 @@ jobs:
       - run:
           name: Create GitHub Release
           command: |
-            # Escaping the heredoc with \<< to satisfy CircleCI's v2.1+ YAML parser
             cat \<<EOF > release-notes.txt
             NixOS build outputs:
             - Installer ISO
@@ -94,4 +93,4 @@ jobs:
 workflows:
   build-and-release:
     jobs:
-      - build-all:
+      - build-all
