@@ -1,31 +1,111 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine.
-# See: https://circleci.com/docs/reference/configuration-reference
 version: 2.1
 
-# Define a job to be invoked later in a workflow.
-# See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#jobs-overview & https://circleci.com/docs/reference/configuration-reference/#jobs
 jobs:
-  say-hello:
-    # Specify the execution environment. You can specify an image from Docker Hub or use one of our convenience images from CircleCI's Developer Hub.
-    # See: https://circleci.com/docs/guides/execution-managed/executor-intro/ & https://circleci.com/docs/reference/configuration-reference/#executor-job
-    docker:
-      # Specify the version you desire here
-      # See: https://circleci.com/developer/images/image/cimg/base
-      - image: cimg/base:current
-
-    # Add steps to the job
-    # See: https://circleci.com/docs/guides/orchestrate/jobs-steps/#steps-overview & https://circleci.com/docs/reference/configuration-reference/#steps
+  build-all:
+    # A machine executor is recommended for Nix OS/ISO builds to avoid Docker-in-Docker limits
+    machine:
+      image: ubuntu-2204:current
     steps:
-      # Checkout the code as the first step.
       - checkout
-      - run:
-          name: "Say hello"
-          command: "echo Hello, World!"
 
-# Orchestrate jobs using workflows
-# See: https://circleci.com/docs/guides/orchestrate/workflows/ & https://circleci.com/docs/reference/configuration-reference/#workflows
+      # -------------------------
+      # Install Nix
+      # -------------------------
+      - run:
+          name: Install Nix
+          command: |
+            # Use the Determinate Systems installer (automatically enables flakes and nix-command)
+            curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install linux --no-confirm
+            
+            # Make Nix available to subsequent steps in the same shell by modifying BASH_ENV
+            echo '. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh' >> $BASH_ENV
+      
+      - run:
+          name: Configure Nix
+          command: |
+            mkdir -p ~/.config/nix
+            echo "access-tokens = github.com=$GITHUB_TOKEN" >> ~/.config/nix/nix.conf
+            echo "keep-outputs = true" >> ~/.config/nix/nix.conf
+            echo "keep-derivations = true" >> ~/.config/nix/nix.conf
+
+      # =========================
+      # 1️⃣ NETBOOT
+      # =========================
+      - run:
+          name: Build Netboot
+          command: |
+            set -euxo pipefail
+            nix build .#netboot -o netboot-result
+            mkdir -p netboot-artifacts
+            cp -L -r netboot-result/* netboot-artifacts/
+
+      # =========================
+      # ISO
+      # =========================
+      - run:
+          name: Build Installer ISO
+          command: |
+            set -euxo pipefail
+            nix build .#iso-installer -o iso-result
+            sudo cp -L iso-result/iso/*.iso nixos-installer.iso
+
+      # =========================
+      # Create tag
+      # =========================
+      - run:
+          name: Generate Tag
+          command: |
+            # CIRCLE_BUILD_NUM is the CircleCI equivalent of github.run_number
+            TAG="v1.0.${CIRCLE_BUILD_NUM}"
+            echo "export TAG=$TAG" >> $BASH_ENV
+
+      # =========================
+      # Patch netboot.ipxe
+      # =========================
+      - run:
+          name: Fix netboot.ipxe for release assets
+          command: |
+            set -euxo pipefail
+
+            # CIRCLE_PROJECT_USERNAME and CIRCLE_PROJECT_REPONAME map to github.repository
+            BASE="https://github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/releases/download/${TAG}"
+            FILE="netboot-artifacts/netboot.ipxe"
+
+            # Insert imgfree if not already present
+            grep -q '^imgfree' "$FILE" || sed -i '2i imgfree' "$FILE"
+
+            # Replace only the file paths, keep params untouched
+            sed -i -E "s|^kernel[[:space:]]+.*bzImage|kernel $BASE/bzImage|" "$FILE"
+            sed -i -E "s|^initrd[[:space:]]+.*initrd|initrd $BASE/initrd|" "$FILE"
+
+      # =========================
+      # Create release
+      # =========================
+      - run:
+          name: Create GitHub Release
+          command: |
+            # The gh CLI is typically pre-installed on modern CircleCI machine images.
+            # Create a quick notes file
+            cat <<EOF > release-notes.txt
+            NixOS build outputs:
+            - Installer ISO
+            - Netboot artifacts
+            EOF
+            
+            # The gh CLI will automatically authenticate using the $GITHUB_TOKEN env variable
+            gh release create "$TAG" \
+              --title "Release $TAG" \
+              --notes-file release-notes.txt \
+              nixos-installer.iso \
+              netboot-artifacts/netboot.ipxe \
+              netboot-artifacts/initrd \
+              netboot-artifacts/bzImage
+
 workflows:
-  say-hello-workflow: # This is the name of the workflow, feel free to change it to better match your workflow.
-    # Inside the workflow, you define the jobs you want to run.
+  build-and-release:
     jobs:
-      - say-hello
+      - build-all:
+          filters:
+            branches:
+              only:
+                - main
